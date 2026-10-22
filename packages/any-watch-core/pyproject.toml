@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "any-watch-core"
+version = "1.0.0"
+description = "Core playback and streaming engine for any-watch suite"
+license = { text = "GPLv3" }
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "httpx>=0.24.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["any_watch_core"]
