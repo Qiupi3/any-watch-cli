@@ -14,6 +14,7 @@ from any_watch_core.base import (
     MediaItem,
     MediaType,
     StreamInfo,
+    SubtitleTrack,
 )
 
 BASE_URL = "https://hianime.at"
@@ -36,7 +37,10 @@ class HiAnimeProvider(BaseProvider):
             try:
                 resp = await client.get(f"{BASE_URL}/search", params={"keyword": query})
                 soup = BeautifulSoup(resp.text, "html.parser")
-                items = soup.select(".film-detail")
+                # Strip sidebar trending/top elements
+                for side in soup.select(".block_area-realtime, #sidebar, .sidebar"):
+                    side.decompose()
+                items = soup.select(".film_list-wrap .film-detail") or soup.select(".film-detail")
 
                 for it in items[:15]:
                     a_elem = it.select_one(".film-name a")
@@ -48,13 +52,11 @@ class HiAnimeProvider(BaseProvider):
                     full_url = urljoin(BASE_URL, href)
                     slug = href.lstrip("/")
 
-                    # Extract anime_id from trailing digits of slug (e.g. solo-leveling-235 -> 235)
                     anime_id = ""
                     m = re.search(r"-(\d+)$", slug)
                     if m:
                         anime_id = m.group(1)
 
-                    # Extract year
                     year = ""
                     for span in it.select(".fd-infor .fdi-item"):
                         txt = span.get_text(strip=True)
@@ -128,7 +130,6 @@ class HiAnimeProvider(BaseProvider):
             soup = BeautifulSoup(srv_resp.json().get("html", ""), "html.parser")
             servers = soup.select(".server-item")
 
-            # Look for ZokoAnime sub server (or fallback to dub)
             chosen_server = next(
                 (s for s in servers if s.get("data-server-name") == "ZokoAnime" and s.get("data-type") == "sub"),
                 None,
@@ -145,7 +146,6 @@ class HiAnimeProvider(BaseProvider):
             s_hash = chosen_server.get("data-hash")
             embed_url = base64.b64decode(s_hash).decode("utf-8")
 
-            # Fetch embed page to extract encrypted payload
             embed_resp = await client.get(embed_url, headers={"Referer": f"{BASE_URL}/"})
             blob_match = re.search(r'window\.__P\s*=\s*\"([^\"]+)\"', embed_resp.text)
             if not blob_match:
@@ -160,14 +160,13 @@ class HiAnimeProvider(BaseProvider):
             if not m3u8_url:
                 raise RuntimeError("No streaming source found in decrypted player payload")
 
-            subs = []
+            subs: list[SubtitleTrack] = []
             for track in dec_json.get("subtitles", []):
                 src = track.get("src")
                 if src:
-                    if track.get("default"):
-                        subs.insert(0, src)
-                    else:
-                        subs.append(src)
+                    lbl = track.get("label", "English")
+                    lang = "ind" if "ind" in lbl.lower() else "eng"
+                    subs.append(SubtitleTrack(url=src, label=lbl, lang=lang))
 
             referer = re.match(r"^(https?://[^/]+)", embed_url).group(1) + "/"
             display_name = f"{episode.media_title} - {episode.display_name}"

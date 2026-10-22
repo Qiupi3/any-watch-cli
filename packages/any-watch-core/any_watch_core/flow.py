@@ -1,37 +1,36 @@
 from __future__ import annotations
 
 """
-Common interactive flow: search → pick → episode → stream → play/download.
-Used by module CLIs and the master pooler CLI.
+Interactive streaming flow: search → title pick → episode pick → stream.
+Stream-only architecture with dual English & Indonesian softsub support.
 """
 
 import asyncio
 import sys
 from typing import Optional
 
-from any_watch_core.base import Action, BaseProvider, EpisodeItem, MediaItem
-from any_watch_core.downloader import download_stream
+from any_watch_core.base import BaseProvider, EpisodeItem, MediaItem
+from any_watch_core.config import get_config
 from any_watch_core.player import play_stream
 from any_watch_core.ui import parse_episode_range, prompt_selection
 
 
-def _run(coro):  # asyncio.run wrapper
+def _run(coro):  # Safe asyncio.run wrapper that never re-awaits on error
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(asyncio.run, coro)
-                return future.result()
-        return loop.run_until_complete(coro)
+        asyncio.get_running_loop()
+        # A loop is already running in this thread, run in a separate thread
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, coro).result()
     except RuntimeError:
+        # No loop running, run directly
         return asyncio.run(coro)
 
 
 def interactive_flow(
     provider: BaseProvider,
-    query: str,
-    action: Action = Action.PLAY,
+    query: Optional[str] = None,
+    item: Optional[MediaItem] = None,
     episode_spec: Optional[str] = None,
     season: Optional[int] = None,
     quality: Optional[str] = None,
@@ -39,25 +38,35 @@ def interactive_flow(
     sub_lang: Optional[str] = None,
     single_episode_mode: bool = False,
 ) -> None:
-    """Full interactive session: search → title pick → episode pick → play/download."""
+    """Stream-only interactive session: search/item → episode pick → stream."""
+    cfg = get_config()
+    chosen_sub = (sub_lang or cfg.sub_language or "ind").lower()
 
-    # ----- 1. Search -----
-    print(f"\n[~] Searching '{query}' via {provider.name}...")
-    items: list[MediaItem] = _run(provider.search(query))
+    selected_item = item
 
-    if not items:
-        print(f"[!] No results found for '{query}'")
-        sys.exit(1)
+    # If item is not provided, perform search and prompt user to pick
+    if not selected_item:
+        if not query:
+            print("[!] No search query or item provided.")
+            sys.exit(1)
 
-    # ----- 2. Pick title -----
-    titles = [it.display_tag for it in items]
-    chosen_title = prompt_selection(titles, f"Select a title from {provider.name}")
-    if not chosen_title:
-        print("[!] No title selected, exiting.")
-        sys.exit(0)
+        # ----- 1. Search -----
+        print(f"\n[~] Searching '{query}' via {provider.name}...")
+        items: list[MediaItem] = _run(provider.search(query))
 
-    selected_item = items[titles.index(chosen_title)]
-    print(f"\n[+] Selected: {selected_item.title}")
+        if not items:
+            print(f"[!] No results found for '{query}'")
+            sys.exit(1)
+
+        # ----- 2. Pick title -----
+        titles = [it.display_tag for it in items]
+        chosen_title = prompt_selection(titles, f"Select a title from {provider.name}")
+        if not chosen_title:
+            print("[!] No title selected, exiting.")
+            sys.exit(0)
+
+        selected_item = items[titles.index(chosen_title)]
+        print(f"\n[+] Selected: {selected_item.title}")
 
     # ----- 3. Get episodes -----
     print("[~] Fetching episode list...")
@@ -71,7 +80,6 @@ def interactive_flow(
     episodes_to_play: list[EpisodeItem] = []
 
     if len(episodes) == 1:
-        # Single-item (movie)
         episodes_to_play = episodes
     elif episode_spec:
         ep_nums = parse_episode_range(episode_spec)
@@ -80,7 +88,6 @@ def interactive_flow(
             print(f"[!] Episode(s) {episode_spec} not found in available episodes.")
             sys.exit(1)
     else:
-        # Interactive episode pick
         ep_titles = [ep.display_name for ep in episodes]
         print(f"\n[~] {len(episodes)} episodes available.")
 
@@ -105,25 +112,20 @@ def interactive_flow(
                 print("[!] No matching episodes found.")
                 sys.exit(1)
 
-    # ----- 5. Stream / download each episode -----
+    # ----- 5. Stream each episode -----
     for ep in episodes_to_play:
-        print(f"\n[~] Resolving stream: {ep.display_name} ...")
+        print(f"\n[~] Resolving stream for {ep.display_name} ...")
         try:
             stream = _run(provider.get_stream(ep, quality=quality))
         except Exception as e:
             print(f"[!] Stream extraction failed for {ep.display_name}: {e}")
             continue
 
-        # Filter or re-order subtitles by language preference if requested
-        if sub_lang and stream.subtitles:
-            filtered = [s for s in stream.subtitles if sub_lang.lower() in s.lower()]
-            if filtered:
-                stream.subtitles = filtered + [s for s in stream.subtitles if s not in filtered]
+        print(f"[+] Launching player: {stream.title}")
+        if stream.subtitles:
+            sub_labels = [f"{getattr(s, 'label', str(s))} ({getattr(s, 'lang', 'other')})" for s in stream.subtitles]
+            print(f"[+] Loaded softsub tracks: {', '.join(sub_labels)}")
+            active_label = "Indonesian" if chosen_sub in ("ind", "id", "indonesian") else "English"
+            print(f"[+] Active default subtitle: {active_label} (press 'j' in MPV to switch)")
 
-        if action == Action.DOWNLOAD:
-            download_stream(stream, category=provider.category)
-        else:
-            print(f"[+] Playing: {stream.title}")
-            if stream.subtitles:
-                print(f"[+] Subtitles: {stream.subtitles[0]}")
-            play_stream(stream, custom_player=player)
+        play_stream(stream, custom_player=player, sub_lang=chosen_sub)

@@ -18,6 +18,9 @@ dependencies = [
 
 [project.scripts]
 any-watch = "any_watch.cli:main"
+any-watch-flix = "any_watch_flix.cli:main"
+any-watch-anime = "any_watch_anime.cli:main"
+any-watch-drama = "any_watch_drama.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["any_watch"]

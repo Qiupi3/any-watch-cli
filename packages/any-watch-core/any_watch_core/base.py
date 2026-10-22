@@ -13,9 +13,14 @@ class MediaType(str, Enum):
     DRAMA = "drama"
 
 
-class Action(str, Enum):
-    PLAY = "play"
-    DOWNLOAD = "download"
+@dataclass
+class SubtitleTrack:
+    url: str
+    label: str = "English"  # "Indonesian", "English", etc.
+    lang: str = "eng"       # "ind", "eng", etc.
+
+    def __str__(self) -> str:
+        return f"{self.label} ({self.lang}): {self.url}"
 
 
 @dataclass
@@ -57,7 +62,7 @@ class StreamInfo:
     url: str  # direct m3u8 or mp4
     title: str  # media title for player display
     referer: str = ""
-    subtitles: list[str] = field(default_factory=list)  # subtitle URLs (.vtt)
+    subtitles: list[SubtitleTrack] = field(default_factory=list)  # softsub tracks
     quality: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 

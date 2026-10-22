@@ -6,15 +6,16 @@ import argparse
 import sys
 from typing import Optional
 
-from any_watch_core.base import Action, MediaItem
+from any_watch_core.base import MediaItem
 from any_watch_core.flow import _run, interactive_flow
 from any_watch_core.pooler import pool_search
 from any_watch_core.ui import prompt_selection
 
+SUBCOMMANDS = {"flix", "anime", "drama"}
+
 
 def get_providers(limit: Optional[str] = None):
     providers = []
-    # Try importing each module gracefully
     try:
         from any_watch_flix.provider import FlixHQProvider
         if not limit or limit in ("flix", "flixhq", "movie", "tv"):
@@ -40,69 +41,53 @@ def get_providers(limit: Optional[str] = None):
 
 
 def main(argv: list[str] | None = None) -> None:
+    raw_args = sys.argv[1:] if argv is None else argv
+
+    # 1. Route directly if the first positional argument is a known subcommand (flix, anime, drama)
+    if raw_args and not raw_args[0].startswith("-"):
+        first_token = raw_args[0].lower()
+        if first_token in SUBCOMMANDS:
+            sub_args = raw_args[1:]
+            if first_token == "flix":
+                from any_watch_flix.cli import main as flix_main
+                flix_main(sub_args)
+                return
+            elif first_token == "anime":
+                from any_watch_anime.cli import main as anime_main
+                anime_main(sub_args)
+                return
+            elif first_token == "drama":
+                from any_watch_drama.cli import main as drama_main
+                drama_main(sub_args)
+                return
+
+    # 2. Otherwise, treat as Master Pooler parser (allowing any title like 'hotel del luna')
     parser = argparse.ArgumentParser(
         prog="any-watch",
         description="Universal terminal streaming suite — search Movies, TV, Anime & Drama 🎬",
+        epilog=(
+            "Subcommands:\n"
+            "  any-watch flix <query>     🍿 Movies & Western TV (FlixHQ)\n"
+            "  any-watch anime <query>    🎌 Anime (HiAnime)\n"
+            "  any-watch drama <query>    📺 KDrama & CDrama (DramaCool)\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    subparsers = parser.add_subparsers(dest="subcommand", help="Module subcommands")
-
-    # Master pooler arguments (default)
     parser.add_argument("query", nargs="?", help="What to watch (searches across all providers)")
-    parser.add_argument("-a", "--action", choices=["play", "download"], default="play", help="Action: play (default) or download")
     parser.add_argument("-e", "--episode", help="Episode(s) e.g. '1', '2-4'")
     parser.add_argument("-s", "--season", type=int, help="Season number")
     parser.add_argument("-q", "--quality", help="Quality e.g. '1080p', '720p'")
     parser.add_argument("-p", "--player", help="Player to use (mpv, iina, vlc)")
-    parser.add_argument("--sub", help="Preferred subtitle language (e.g. indonesian, english)")
+    parser.add_argument(
+        "--sub",
+        choices=["ind", "eng"],
+        default=None,
+        help="Preferred subtitle language: ind (Indonesian) or eng (English)",
+    )
     parser.add_argument("--provider", choices=["flix", "anime", "drama"], help="Limit search to one provider")
 
-    # Subcommands for flix, anime, drama
-    flix_parser = subparsers.add_parser("flix", help="🍿 Movies & TV Shows (FlixHQ)")
-    flix_parser.add_argument("query", nargs="?", help="Movie or show name")
-    flix_parser.add_argument("-a", "--action", choices=["play", "download"], default="play")
-    flix_parser.add_argument("-e", "--episode")
-    flix_parser.add_argument("-s", "--season", type=int)
-    flix_parser.add_argument("-q", "--quality")
-    flix_parser.add_argument("-p", "--player")
-    flix_parser.add_argument("--sub")
+    args = parser.parse_args(raw_args)
 
-    anime_parser = subparsers.add_parser("anime", help="🎌 Anime (HiAnime)")
-    anime_parser.add_argument("query", nargs="?", help="Anime name")
-    anime_parser.add_argument("-a", "--action", choices=["play", "download"], default="play")
-    anime_parser.add_argument("-e", "--episode")
-    anime_parser.add_argument("-q", "--quality")
-    anime_parser.add_argument("-p", "--player")
-    anime_parser.add_argument("--sub")
-
-    drama_parser = subparsers.add_parser("drama", help="📺 KDrama & CDrama (DramaCool)")
-    drama_parser.add_argument("query", nargs="?", help="Drama name")
-    drama_parser.add_argument("-a", "--action", choices=["play", "download"], default="play")
-    drama_parser.add_argument("-e", "--episode")
-    drama_parser.add_argument("-s", "--season", type=int)
-    drama_parser.add_argument("-q", "--quality")
-    drama_parser.add_argument("-p", "--player")
-    drama_parser.add_argument("--sub")
-
-    args = parser.parse_args(argv)
-
-    # Route subcommands if used
-    if args.subcommand == "flix":
-        from any_watch_flix.cli import main as flix_main
-        sub_args = sys.argv[2:] if argv is None else argv[1:]
-        flix_main(sub_args)
-        return
-    elif args.subcommand == "anime":
-        from any_watch_anime.cli import main as anime_main
-        sub_args = sys.argv[2:] if argv is None else argv[1:]
-        anime_main(sub_args)
-        return
-    elif args.subcommand == "drama":
-        from any_watch_drama.cli import main as drama_main
-        sub_args = sys.argv[2:] if argv is None else argv[1:]
-        drama_main(sub_args)
-        return
-
-    # Master pooler flow
     if not args.query:
         try:
             args.query = input("What would you like to watch? ").strip()
@@ -126,7 +111,6 @@ def main(argv: list[str] | None = None) -> None:
         print(f"[!] No results found for '{args.query}' across {provider_names}.")
         sys.exit(1)
 
-    # Display unified selector
     display_tags = [item.display_tag for item in all_results]
     chosen_tag = prompt_selection(display_tags, "Select what to watch")
     if not chosen_tag:
@@ -136,7 +120,6 @@ def main(argv: list[str] | None = None) -> None:
     selected: MediaItem = all_results[display_tags.index(chosen_tag)]
     print(f"\n[+] Selected: {selected.title}  [{selected.provider}]")
 
-    # Match selected item back to its provider
     target_provider = next(
         (p for p in providers if p.name.lower() in selected.provider.lower() or selected.provider.lower() in p.name.lower()),
         providers[0],
@@ -144,8 +127,7 @@ def main(argv: list[str] | None = None) -> None:
 
     interactive_flow(
         provider=target_provider,
-        query=selected.title,
-        action=Action(args.action),
+        item=selected,
         episode_spec=args.episode,
         season=args.season,
         quality=args.quality,

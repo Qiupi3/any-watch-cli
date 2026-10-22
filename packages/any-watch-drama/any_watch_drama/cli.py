@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import sys
 
-from any_watch_core.base import Action
 from any_watch_core.flow import interactive_flow
 from any_watch_drama.provider import DramaProvider
 
@@ -16,17 +15,16 @@ def main(argv: list[str] | None = None) -> None:
         description="Stream Korean & Chinese Dramas via DramaCool 📺",
     )
     parser.add_argument("query", nargs="?", help="Drama name to search")
-    parser.add_argument(
-        "-a", "--action",
-        choices=["play", "download"],
-        default="play",
-        help="Action: play (default) or download",
-    )
-    parser.add_argument("-e", "--episode", help="Episode(s) e.g. '1', '3-6', '1,4'")
+    parser.add_argument("-e", "--episode", help="Episode(s) e.g. '1', '3-6'")
     parser.add_argument("-s", "--season", type=int, help="Season number")
     parser.add_argument("-q", "--quality", help="Quality hint")
     parser.add_argument("-p", "--player", help="Player to use (mpv, iina, vlc)")
-    parser.add_argument("--sub", help="Preferred subtitle language")
+    parser.add_argument(
+        "--sub",
+        choices=["ind", "eng"],
+        default=None,
+        help="Preferred subtitle language: ind (Indonesian) or eng (English)",
+    )
 
     args = parser.parse_args(argv)
 
@@ -44,7 +42,6 @@ def main(argv: list[str] | None = None) -> None:
     interactive_flow(
         provider=provider,
         query=args.query,
-        action=Action(args.action),
         episode_spec=args.episode,
         season=args.season,
         quality=args.quality,

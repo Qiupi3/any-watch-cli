@@ -12,6 +12,7 @@ from any_watch_core.base import (
     MediaItem,
     MediaType,
     StreamInfo,
+    SubtitleTrack,
 )
 
 DRAMACOOL_BASE = "https://wxx.dramacool.com.tr"
@@ -35,12 +36,18 @@ class DramaProvider(BaseProvider):
                 resp = await client.get(f"{DRAMACOOL_BASE}/", params={"s": query})
                 if resp.status_code == 200:
                     soup = BeautifulSoup(resp.text, "html.parser")
-                    for a in soup.find_all("a"):
+
+                    # Strip out sidebar recommendations and widgets to avoid irrelevant drama matches
+                    for side in soup.select(".content-right, .sidebar, .widget"):
+                        side.decompose()
+
+                    container = soup.select_one(".content-left") or soup
+                    for a in container.find_all("a"):
                         href = a.get("href", "")
                         if "drama-detail" in href:
                             h_elem = a.find(["h2", "h3", "h4"])
                             title = h_elem.get_text(strip=True) if h_elem else a.get_text(strip=True)
-                            if not title or len(title) < 2:
+                            if not title or len(title) < 2 or "view more" in title.lower():
                                 continue
 
                             year = ""
@@ -50,7 +57,6 @@ class DramaProvider(BaseProvider):
 
                             clean_title = re.sub(r"\(\d{4}\)", "", title).strip()
 
-                            # Avoid duplicate entries
                             if not any(r.id == href for r in results):
                                 results.append(
                                     MediaItem(
@@ -84,7 +90,6 @@ class DramaProvider(BaseProvider):
                         ep_text = a.get_text(strip=True)
                         found_links.append((ep_text, href))
 
-                # Deduplicate links preserving order
                 seen_urls = set()
                 for ep_text, href in found_links:
                     if href in seen_urls:
@@ -102,7 +107,6 @@ class DramaProvider(BaseProvider):
                         )
                     )
 
-                # DramaCool pages list newest episode first; reverse to chronological order
                 episodes.reverse()
             except Exception as e:
                 print(f"[DramaCool] Failed to load episodes: {e}")
@@ -128,13 +132,11 @@ class DramaProvider(BaseProvider):
             if not embed_url:
                 raise RuntimeError(f"No video embed found on episode page: {episode.id}")
 
-            # 1. If embed is a 2ivdeo/kisskh source
             if "2ivdeo.buzz" in embed_url or "kisskh" in embed_url:
                 stream_info = await self._resolve_2ivdeo(embed_url, episode, client, quality)
                 if stream_info:
                     return stream_info
 
-            # 2. Direct m3u8 or mp4
             if embed_url.endswith(".m3u8") or embed_url.endswith(".mp4"):
                 return StreamInfo(
                     url=embed_url,
@@ -143,7 +145,6 @@ class DramaProvider(BaseProvider):
                     quality=quality,
                 )
 
-            # 3. Generic regex scan of embed target
             res = await client.get(embed_url, timeout=10)
             m3u8_m = re.search(r"https?://[^\s\"\'\<\>]+\.m3u8[^\s\"\'\<\>]*", res.text)
             if m3u8_m:
@@ -166,7 +167,7 @@ class DramaProvider(BaseProvider):
         client: httpx.AsyncClient,
         quality: str | None,
     ) -> StreamInfo | None:
-        """Resolve stream from 2ivdeo.buzz endpoint using browser fetch emulation headers."""
+        """Resolve stream and English & Indonesian softsubs from 2ivdeo/kisskh."""
         m = re.search(r"kisskh/(\d+)", embed_url)
         if not m:
             return None
@@ -188,10 +189,17 @@ class DramaProvider(BaseProvider):
             if r.status_code == 200:
                 data = r.json()
                 if data.get("status") == "ok" and data.get("source"):
-                    subtitles = []
+                    subtitles: list[SubtitleTrack] = []
                     for t in data.get("tracks", []):
                         if isinstance(t, dict) and t.get("file"):
-                            subtitles.append(t["file"])
+                            lbl = t.get("label", "Subtitle")
+                            lbl_l = lbl.lower()
+                            if "ind" in lbl_l or "id" in lbl_l:
+                                subtitles.append(SubtitleTrack(url=t["file"], label=lbl, lang="ind"))
+                            elif "eng" in lbl_l:
+                                subtitles.append(SubtitleTrack(url=t["file"], label=lbl, lang="eng"))
+                            else:
+                                subtitles.append(SubtitleTrack(url=t["file"], label=lbl, lang="other"))
 
                     return StreamInfo(
                         url=data["source"],

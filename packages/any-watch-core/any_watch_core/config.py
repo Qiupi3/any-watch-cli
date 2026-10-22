@@ -9,9 +9,8 @@ from pathlib import Path
 @dataclass
 class Config:
     player: str = "mpv"  # mpv, iina, vlc
-    download_dir: str = str(Path.home() / "Downloads" / "any-watch")
     quality: str = "auto"
-    sub_language: str = "english"
+    sub_language: str = "ind"  # ind (Indonesian) or eng (English)
     stream_provider: str = "auto"
 
 
