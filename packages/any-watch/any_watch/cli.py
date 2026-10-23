@@ -43,23 +43,39 @@ def get_providers(limit: Optional[str] = None):
 def main(argv: list[str] | None = None) -> None:
     raw_args = sys.argv[1:] if argv is None else argv
 
-    # 1. Route directly if the first positional argument is a known subcommand (flix, anime, drama)
-    if raw_args and not raw_args[0].startswith("-"):
-        first_token = raw_args[0].lower()
-        if first_token in SUBCOMMANDS:
-            sub_args = raw_args[1:]
-            if first_token == "flix":
-                from any_watch_flix.cli import main as flix_main
-                flix_main(sub_args)
-                return
-            elif first_token == "anime":
-                from any_watch_anime.cli import main as anime_main
-                anime_main(sub_args)
-                return
-            elif first_token == "drama":
-                from any_watch_drama.cli import main as drama_main
-                drama_main(sub_args)
-                return
+    # 1. Route directly if a known subcommand (flix, anime, drama) is found as a command keyword
+    sub_cmd = None
+    sub_idx = -1
+    opt_with_arg = {"-e", "--episode", "-s", "--season", "-q", "--quality", "-p", "--player", "--sub", "--provider"}
+    i = 0
+    while i < len(raw_args):
+        arg = raw_args[i]
+        if arg in opt_with_arg:
+            i += 2
+            continue
+        elif arg.startswith("-"):
+            i += 1
+            continue
+        else:
+            if arg.lower() in SUBCOMMANDS:
+                sub_cmd = arg.lower()
+                sub_idx = i
+            break
+
+    if sub_cmd and sub_idx >= 0:
+        sub_args = raw_args[:sub_idx] + raw_args[sub_idx + 1:]
+        if sub_cmd == "flix":
+            from any_watch_flix.cli import main as flix_main
+            flix_main(sub_args)
+            return
+        elif sub_cmd == "anime":
+            from any_watch_anime.cli import main as anime_main
+            anime_main(sub_args)
+            return
+        elif sub_cmd == "drama":
+            from any_watch_drama.cli import main as drama_main
+            drama_main(sub_args)
+            return
 
     # 2. Otherwise, treat as Master Pooler parser (allowing any title like 'hotel del luna')
     parser = argparse.ArgumentParser(

@@ -48,7 +48,8 @@ async def pool_search(providers: list[BaseProvider], query: str) -> list[MediaIt
         try:
             return await provider.search(query)
         except Exception as e:
-            print(f"[{provider.name}] Search failed: {e}")
+            err_msg = str(e) or type(e).__name__
+            print(f"[{provider.name}] Search failed: {err_msg}")
             return []
 
     results_per_provider = await asyncio.gather(

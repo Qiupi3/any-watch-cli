@@ -35,7 +35,7 @@ class FlixHQProvider(BaseProvider):
 
     async def search(self, query: str) -> list[MediaItem]:
         results: list[MediaItem] = []
-        async with httpx.AsyncClient(headers=HEADERS, timeout=10, follow_redirects=True) as client:
+        async with httpx.AsyncClient(headers=HEADERS, timeout=15, follow_redirects=True) as client:
             try:
                 resp = await client.get(SEARCH_URL, params={"keyword": query})
                 soup = BeautifulSoup(resp.text, "html.parser")
@@ -86,7 +86,8 @@ class FlixHQProvider(BaseProvider):
                         )
                     )
             except Exception as e:
-                print(f"[FlixHQ] Search error: {e}")
+                err_msg = str(e) or type(e).__name__
+                print(f"[FlixHQ] Search error: {err_msg}")
 
         return results
 
@@ -151,6 +152,12 @@ class FlixHQProvider(BaseProvider):
                             media_title=item.title,
                         )
                     )
+
+            def _ep_sort_key(ep: EpisodeItem) -> tuple[float, str]:
+                m = re.search(r"(\d+(?:\.\d+)?)", str(ep.number))
+                return (float(m.group(1)) if m else float("inf"), str(ep.number))
+
+            episodes.sort(key=_ep_sort_key)
 
         return episodes
 

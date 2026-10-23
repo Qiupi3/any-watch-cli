@@ -12,7 +12,13 @@ from typing import Optional
 from any_watch_core.base import BaseProvider, EpisodeItem, MediaItem
 from any_watch_core.config import get_config
 from any_watch_core.player import play_stream
-from any_watch_core.ui import parse_episode_range, prompt_selection
+from any_watch_core.ui import (
+    episode_sort_key,
+    parse_episode_range,
+    prompt_episode_selection,
+    prompt_selection,
+    resolve_selected_episodes,
+)
 
 
 def _run(coro):  # Safe asyncio.run wrapper that never re-awaits on error
@@ -36,7 +42,7 @@ def interactive_flow(
     quality: Optional[str] = None,
     player: Optional[str] = None,
     sub_lang: Optional[str] = None,
-    single_episode_mode: bool = False,
+    single_episode_mode: bool = True,
 ) -> None:
     """Stream-only interactive session: search/item → episode pick → stream."""
     cfg = get_config()
@@ -76,41 +82,24 @@ def interactive_flow(
         print("[!] No episodes found.")
         sys.exit(1)
 
+    # Naturally sort episodes to ensure strictly correct numerical order
+    episodes.sort(key=episode_sort_key)
+
     # ----- 4. Resolve which episodes to play -----
     episodes_to_play: list[EpisodeItem] = []
 
     if len(episodes) == 1:
         episodes_to_play = episodes
     elif episode_spec:
-        ep_nums = parse_episode_range(episode_spec)
-        episodes_to_play = [ep for ep in episodes if int(float(ep.number)) in ep_nums]
+        episodes_to_play = resolve_selected_episodes(episodes, episode_spec)
         if not episodes_to_play:
             print(f"[!] Episode(s) {episode_spec} not found in available episodes.")
             sys.exit(1)
     else:
-        ep_titles = [ep.display_name for ep in episodes]
-        print(f"\n[~] {len(episodes)} episodes available.")
-
-        if single_episode_mode:
-            chosen_ep = prompt_selection(ep_titles, "Select episode")
-            if not chosen_ep:
-                print("[!] No episode selected.")
-                sys.exit(0)
-            episodes_to_play = [episodes[ep_titles.index(chosen_ep)]]
-        else:
-            try:
-                user_val = input(
-                    f"Episode to watch (e.g. '1', '1-3', '1,5') [{len(episodes)} available] [1]: "
-                ).strip()
-            except (EOFError, KeyboardInterrupt):
-                print()
-                sys.exit(0)
-            ep_spec_input = user_val if user_val else "1"
-            ep_nums = parse_episode_range(ep_spec_input)
-            episodes_to_play = [ep for ep in episodes if int(float(ep.number)) in ep_nums]
-            if not episodes_to_play:
-                print("[!] No matching episodes found.")
-                sys.exit(1)
+        episodes_to_play = prompt_episode_selection(episodes)
+        if not episodes_to_play:
+            print("[!] No episode selected, exiting.")
+            sys.exit(0)
 
     # ----- 5. Stream each episode -----
     for ep in episodes_to_play:

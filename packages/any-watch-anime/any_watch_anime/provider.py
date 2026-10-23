@@ -33,7 +33,7 @@ class HiAnimeProvider(BaseProvider):
 
     async def search(self, query: str) -> list[MediaItem]:
         results: list[MediaItem] = []
-        async with httpx.AsyncClient(headers=HEADERS, timeout=10, follow_redirects=True) as client:
+        async with httpx.AsyncClient(headers=HEADERS, timeout=15, follow_redirects=True) as client:
             try:
                 resp = await client.get(f"{BASE_URL}/search", params={"keyword": query})
                 soup = BeautifulSoup(resp.text, "html.parser")
@@ -76,7 +76,8 @@ class HiAnimeProvider(BaseProvider):
                         )
                     )
             except Exception as e:
-                print(f"[HiAnime] Search error: {e}")
+                err_msg = str(e) or type(e).__name__
+                print(f"[HiAnime] Search error: {err_msg}")
 
         return results
 
@@ -113,6 +114,12 @@ class HiAnimeProvider(BaseProvider):
                             extra={"anime_id": anime_id},
                         )
                     )
+
+                def _ep_sort_key(ep: EpisodeItem) -> tuple[float, str]:
+                    m = re.search(r"(\d+(?:\.\d+)?)", str(ep.number))
+                    return (float(m.group(1)) if m else float("inf"), str(ep.number))
+
+                episodes.sort(key=_ep_sort_key)
 
         return episodes
 

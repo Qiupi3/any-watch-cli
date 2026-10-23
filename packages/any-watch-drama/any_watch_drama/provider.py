@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from urllib.parse import urljoin
 
@@ -31,7 +32,7 @@ class DramaProvider(BaseProvider):
     async def search(self, query: str) -> list[MediaItem]:
         """Search DramaCool index for Korean, Chinese, and Asian dramas."""
         results: list[MediaItem] = []
-        async with httpx.AsyncClient(headers=HEADERS, timeout=10, follow_redirects=True) as client:
+        async with httpx.AsyncClient(headers=HEADERS, timeout=15, follow_redirects=True) as client:
             try:
                 resp = await client.get(f"{DRAMACOOL_BASE}/", params={"s": query})
                 if resp.status_code == 200:
@@ -70,7 +71,8 @@ class DramaProvider(BaseProvider):
                                     )
                                 )
             except Exception as e:
-                print(f"[DramaCool] Search error: {e}")
+                err_msg = str(e) or type(e).__name__
+                print(f"[DramaCool] Search error: {err_msg}")
 
         return results
 
@@ -107,7 +109,11 @@ class DramaProvider(BaseProvider):
                         )
                     )
 
-                episodes.reverse()
+                def _ep_sort_key(ep: EpisodeItem) -> tuple[float, str]:
+                    m = re.search(r"(\d+(?:\.\d+)?)", str(ep.number))
+                    return (float(m.group(1)) if m else float("inf"), str(ep.number))
+
+                episodes.sort(key=_ep_sort_key)
             except Exception as e:
                 print(f"[DramaCool] Failed to load episodes: {e}")
 
@@ -184,31 +190,37 @@ class DramaProvider(BaseProvider):
             "Sec-Fetch-Site": "same-origin",
         }
 
-        try:
-            r = await client.get(source_url, headers=headers)
-            if r.status_code == 200:
-                data = r.json()
-                if data.get("status") == "ok" and data.get("source"):
-                    subtitles: list[SubtitleTrack] = []
-                    for t in data.get("tracks", []):
-                        if isinstance(t, dict) and t.get("file"):
-                            lbl = t.get("label", "Subtitle")
-                            lbl_l = lbl.lower()
-                            if "ind" in lbl_l or "id" in lbl_l:
-                                subtitles.append(SubtitleTrack(url=t["file"], label=lbl, lang="ind"))
-                            elif "eng" in lbl_l:
-                                subtitles.append(SubtitleTrack(url=t["file"], label=lbl, lang="eng"))
-                            else:
-                                subtitles.append(SubtitleTrack(url=t["file"], label=lbl, lang="other"))
+        for attempt in range(1, 4):
+            try:
+                r = await client.get(source_url, headers=headers)
+                if r.status_code == 200:
+                    data = r.json()
+                    if data.get("status") == "ok" and data.get("source"):
+                        subtitles: list[SubtitleTrack] = []
+                        for t in data.get("tracks", []):
+                            if isinstance(t, dict) and t.get("file"):
+                                lbl = t.get("label", "Subtitle")
+                                lbl_l = lbl.lower()
+                                if "ind" in lbl_l or "id" in lbl_l:
+                                    subtitles.append(SubtitleTrack(url=t["file"], label=lbl, lang="ind"))
+                                elif "eng" in lbl_l:
+                                    subtitles.append(SubtitleTrack(url=t["file"], label=lbl, lang="eng"))
+                                else:
+                                    subtitles.append(SubtitleTrack(url=t["file"], label=lbl, lang="other"))
 
-                    return StreamInfo(
-                        url=data["source"],
-                        title=f"{episode.media_title} - {episode.display_name}",
-                        referer=embed_url,
-                        subtitles=subtitles,
-                        quality=quality,
-                    )
-        except Exception:
-            pass
+                        return StreamInfo(
+                            url=data["source"],
+                            title=f"{episode.media_title} - {episode.display_name}",
+                            referer=embed_url,
+                            subtitles=subtitles,
+                            quality=quality,
+                        )
+                    elif data.get("retryable") and attempt < 3:
+                        await asyncio.sleep(1.0)
+                        continue
+            except Exception:
+                if attempt < 3:
+                    await asyncio.sleep(1.0)
+                    continue
 
         return None
