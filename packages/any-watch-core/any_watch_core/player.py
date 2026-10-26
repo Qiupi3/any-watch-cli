@@ -5,11 +5,9 @@ import platform as plt
 import re
 import shutil
 import subprocess
-import urllib.request
 from typing import TYPE_CHECKING
 
 from .config import get_config
-from .proxy import StreamProxy, srt_to_vtt
 
 if TYPE_CHECKING:
     from .base import StreamInfo, SubtitleTrack
@@ -72,82 +70,34 @@ def _pick_preferred_sub(subtitles: list[SubtitleTrack | str], preferred_lang: st
     return first.url if hasattr(first, "url") else first
 
 
-def prepare_android_sub(sub_url: str | None, referer: str | None = None) -> str | None:
-    """Download subtitle to /sdcard with Referer/UA and convert to WebVTT for local Android player reading."""
-    if not sub_url:
-        return None
-
-    for base in ["/sdcard", "/storage/emulated/0"]:
-        if os.path.exists(base):
-            target = os.path.join(base, "any-watch-sub.vtt")
-            try:
-                req = urllib.request.Request(sub_url)
-                req.add_header("User-Agent", USER_AGENT)
-                if referer:
-                    req.add_header("Referer", referer)
-                with urllib.request.urlopen(req, timeout=12) as resp:
-                    raw_content = resp.read().decode("utf-8", errors="replace")
-                with open(target, "w", encoding="utf-8") as f:
-                    f.write(srt_to_vtt(raw_content))
-                return target
-            except Exception:
-                return None
-    return None
-
-
 def setup_mpv_android_conf(
-    title: str,
     referer: str | None = None,
-    local_sub_path: str | None = None,
-    slang_val: str = "ind,id,eng,en",
-    quality_fmt: str | None = None,
+    sub_urls: list[str] | None = None,
+    preferred_sub: str | None = None,
 ) -> None:
-    """Write playback session settings directly into /sdcard/mpv/mpv.conf for is.xyz.mpv."""
-    for base in ["/sdcard/mpv", "/storage/emulated/0/mpv"]:
-        try:
-            os.makedirs(base, exist_ok=True)
-            conf_path = os.path.join(base, "mpv.conf")
-            lines = [
-                "# any-watch session configuration",
-                "hwdec=auto",
-                f"force-media-title=Playing {title}",
-                f"slang={slang_val}",
-            ]
-            if referer:
-                lines.append(f"referrer={referer}")
-                lines.append(f"http-header-fields=Referer: {referer}")
-            if local_sub_path:
-                lines.append(f"sub-file={local_sub_path}")
-            if quality_fmt:
-                lines.append(f"ytdl-format={quality_fmt}")
+    """Mimic ani-cli: write referrer and sub-file into /storage/emulated/0/mpv/mpv.config.mp4 (and mpv.conf)."""
+    lines: list[str] = []
+    if referer:
+        lines.append(f"referrer={referer}")
+    if preferred_sub:
+        lines.append(f"sub-file={preferred_sub}")
+    if sub_urls:
+        for s in sub_urls:
+            if s and s != preferred_sub:
+                lines.append(f"sub-file={s}")
 
-            with open(conf_path, "w", encoding="utf-8") as f:
-                f.write("\n".join(lines) + "\n")
+    content = "\n".join(lines) + "\n" if lines else ""
+
+    for conf_dir in ["/storage/emulated/0/mpv", "/sdcard/mpv"]:
+        try:
+            os.makedirs(conf_dir, exist_ok=True)
+            for fname in ["mpv.config.mp4", "mpv.conf"]:
+                target = os.path.join(conf_dir, fname)
+                with open(target, "w", encoding="utf-8") as f:
+                    f.write(content)
             return
         except Exception:
             continue
-
-
-def setup_vlc_android_m3u(stream_url: str, referer: str | None = None) -> str | None:
-    """Create a temporary M3U playlist file with EXTVLCOPT for VLC if Referer is required."""
-    if not referer:
-        return None
-    for base in ["/sdcard", "/storage/emulated/0"]:
-        if os.path.exists(base):
-            target = os.path.join(base, "any-watch-stream.m3u8")
-            try:
-                content = (
-                    "#EXTM3U\n"
-                    f"#EXTVLCOPT:http-referrer={referer}\n"
-                    f"#EXTVLCOPT:http-user-agent={USER_AGENT}\n"
-                    f"{stream_url}\n"
-                )
-                with open(target, "w", encoding="utf-8") as f:
-                    f.write(content)
-                return f"file://{target}"
-            except Exception:
-                return None
-    return None
 
 
 def play_stream(
@@ -188,7 +138,7 @@ def play_stream(
             iina_quality_args = [f"--mpv-ytdl-format={quality_fmt}"]
 
     # -----------------------------------------------------------------------
-    # Android (Termux) Playback via Android Intent
+    # Android (Termux) Playback via Android Intent (mimicking ani-cli and flix-cli)
     # -----------------------------------------------------------------------
     if is_android():
         player_type = chosen_player
@@ -196,31 +146,31 @@ def play_stream(
             player_type = "mpv"
 
         if player_type == "vlc":
-            component = "org.videolan.vlc/org.videolan.vlc.gui.video.VideoPlayerActivity"
-            player_name = "VLC"
+            primary_name = "VLC"
+            primary_comp = "org.videolan.vlc/org.videolan.vlc.gui.video.VideoPlayerActivity"
+            fallback_name = "MPV"
+            fallback_comp = "is.xyz.mpv/.MPVActivity"
         elif player_type == "mpv":
-            component = "is.xyz.mpv/.MPVActivity"
-            player_name = "MPV"
+            primary_name = "MPV"
+            primary_comp = "is.xyz.mpv/.MPVActivity"
+            fallback_name = "VLC"
+            fallback_comp = "org.videolan.vlc/org.videolan.vlc.gui.video.VideoPlayerActivity"
         else:
-            component = player_type
-            player_name = player_type
+            primary_name = player_type
+            primary_comp = player_type
+            fallback_name = "MPV"
+            fallback_comp = "is.xyz.mpv/.MPVActivity"
 
-        # Download preferred subtitle locally to avoid 403 / CORS in Android players
-        local_sub = prepare_android_sub(chosen_sub_url, referer=referer)
-        sub_to_use = local_sub or chosen_sub_url
-
-        print(f"\n[~] Android (Termux) Detected: Launching {player_name} Intent for '{title}' ~")
-
-        if player_type == "mpv":
-            # MPV on Android reads /sdcard/mpv/mpv.conf for session options (referer, sub-file, slang)
+        # Setup MPV config file for session if MPV is primary or fallback (mimicking ani-cli)
+        if primary_name == "MPV" or fallback_name == "MPV":
             setup_mpv_android_conf(
-                title=title,
                 referer=referer,
-                local_sub_path=local_sub,
-                slang_val=slang_val,
-                quality_fmt=quality_fmt,
+                sub_urls=sub_urls,
+                preferred_sub=chosen_sub_url,
             )
-            args = [
+
+        def _build_intent_args(component: str, name: str) -> list[str]:
+            cmd = [
                 "am",
                 "start",
                 "--user",
@@ -229,113 +179,46 @@ def play_stream(
                 "android.intent.action.VIEW",
                 "-d",
                 url,
-                "-t",
-                "video/*",
                 "-n",
                 component,
                 "-e",
                 "title",
                 f"Playing {title}",
             ]
-        else:  # VLC
-            vlc_play_url = setup_vlc_android_m3u(url, referer=referer) or url
-            args = [
-                "am",
-                "start",
-                "--user",
-                "0",
-                "-a",
-                "android.intent.action.VIEW",
-                "-d",
-                vlc_play_url,
-                "-t",
-                "application/vnd.apple.mpegurl" if ".m3u" in vlc_play_url else "video/*",
-                "-n",
-                component,
-                "-e",
-                "title",
-                f"Playing {title}",
-            ]
-            if sub_to_use:
-                vlc_sub_uri = f"file://{sub_to_use}" if sub_to_use.startswith("/") else sub_to_use
-                args.extend(["--es", "subtitles_location", vlc_sub_uri])
+            if name == "VLC" and chosen_sub_url:
+                cmd.extend(["--es", "subtitles_location", chosen_sub_url])
+            return cmd
+
+        print(f"\n[~] Android Detected: Launching {primary_name} Intent for '{title}' ~")
+        primary_args = _build_intent_args(primary_comp, primary_name)
 
         try:
-            res = subprocess.run(args, capture_output=True, text=True)
-            if res.returncode == 0 and "Error:" not in res.stderr and "Error:" not in res.stdout:
-                print(f"[+] Stream opened in {player_name}.")
+            res = subprocess.run(primary_args, capture_output=True, text=True)
+            if res.returncode == 0 and "Error:" not in (res.stderr or "") and "Error:" not in (res.stdout or ""):
+                print(f"[+] Stream opened in {primary_name}.")
                 return
             else:
-                err = (res.stderr or res.stdout).strip()
-                print(f"[!] {player_name} intent launch failed: {err}")
+                err = (res.stderr or res.stdout or "").strip()
+                print(f"[!] {primary_name} intent launch failed: {err}")
         except Exception as e:
-            print(f"[!] Error launching {player_name}: {e}")
+            print(f"[!] Error launching {primary_name}: {e}")
 
-        # Fallback to alternate player if primary failed
-        if player_type == "mpv":
-            fallback_comp = "org.videolan.vlc/org.videolan.vlc.gui.video.VideoPlayerActivity"
-            fallback_name = "VLC"
-            fb_play_url = setup_vlc_android_m3u(url, referer=referer) or url
-            fb_args = [
-                "am",
-                "start",
-                "--user",
-                "0",
-                "-a",
-                "android.intent.action.VIEW",
-                "-d",
-                fb_play_url,
-                "-t",
-                "application/vnd.apple.mpegurl" if ".m3u" in fb_play_url else "video/*",
-                "-n",
-                fallback_comp,
-                "-e",
-                "title",
-                f"Playing {title}",
-            ]
-            if sub_to_use:
-                vlc_sub_uri = f"file://{sub_to_use}" if sub_to_use.startswith("/") else sub_to_use
-                fb_args.extend(["--es", "subtitles_location", vlc_sub_uri])
-        elif player_type == "vlc":
-            fallback_comp = "is.xyz.mpv/.MPVActivity"
-            fallback_name = "MPV"
-            setup_mpv_android_conf(
-                title=title,
-                referer=referer,
-                local_sub_path=local_sub,
-                slang_val=slang_val,
-                quality_fmt=quality_fmt,
-            )
-            fb_args = [
-                "am",
-                "start",
-                "--user",
-                "0",
-                "-a",
-                "android.intent.action.VIEW",
-                "-d",
-                url,
-                "-t",
-                "video/*",
-                "-n",
-                fallback_comp,
-                "-e",
-                "title",
-                f"Playing {title}",
-            ]
-        else:
-            fb_args = None
-
-        if fb_args:
+        # Attempt fallback player
+        if fallback_comp:
             print(f"[~] Attempting fallback to {fallback_name}...")
+            fallback_args = _build_intent_args(fallback_comp, fallback_name)
             try:
-                fb_res = subprocess.run(fb_args, capture_output=True, text=True)
-                if fb_res.returncode == 0 and "Error:" not in fb_res.stderr and "Error:" not in fb_res.stdout:
+                fb_res = subprocess.run(fallback_args, capture_output=True, text=True)
+                if fb_res.returncode == 0 and "Error:" not in (fb_res.stderr or "") and "Error:" not in (fb_res.stdout or ""):
                     print(f"[+] Stream opened in {fallback_name}.")
                     return
-            except Exception:
-                pass
+                else:
+                    fb_err = (fb_res.stderr or fb_res.stdout or "").strip()
+                    print(f"[!] {fallback_name} intent launch failed: {fb_err}")
+            except Exception as e:
+                print(f"[!] Error launching {fallback_name}: {e}")
 
+        # Final fallback to termux-open-url or generic VIEW intent
         if shutil.which("termux-open-url"):
             subprocess.run(["termux-open-url", url], check=False)
             return
