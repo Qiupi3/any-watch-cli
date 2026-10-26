@@ -1,52 +1,19 @@
 #!/usr/bin/env python3
-"""any-watch-drama — Stream KDrama & CDrama from DramaCool."""
+"""any-watch-drama — KDrama/CDrama from KissKH, NaraShika, Nontongo, and more."""
 from __future__ import annotations
 
-import argparse
-import sys
-
-from any_watch_core.flow import interactive_flow
-from any_watch_drama.provider import DramaProvider
+from any_watch_core.app import run_category_app
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(
+    run_category_app(
+        "drama",
+        argv,
         prog="any-watch-drama",
-        description="Stream Korean & Chinese Dramas via DramaCool 📺",
-    )
-    parser.add_argument("query", nargs="?", help="Drama name to search")
-    parser.add_argument("-e", "--episode", help="Episode(s) e.g. '1', '3-6'")
-    parser.add_argument("-s", "--season", type=int, help="Season number")
-    parser.add_argument("-q", "--quality", help="Quality hint")
-    parser.add_argument("-p", "--player", help="Player to use (mpv, iina, vlc)")
-    parser.add_argument(
-        "--sub",
-        choices=["ind", "eng"],
-        default=None,
-        help="Preferred subtitle language: ind (Indonesian) or eng (English)",
-    )
-
-    args = parser.parse_args(argv)
-
-    if not args.query:
-        try:
-            args.query = input("Enter drama name: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            sys.exit(0)
-        if not args.query:
-            parser.print_help()
-            sys.exit(1)
-
-    provider = DramaProvider()
-    interactive_flow(
-        provider=provider,
-        query=args.query,
-        episode_spec=args.episode,
-        season=args.season,
-        quality=args.quality,
-        player=args.player,
-        sub_lang=args.sub,
+        description=(
+            "Stream Korean and Chinese dramas 📺 — KissKH, NaraShika, "
+            "Nontongo, DramaSerial and Drakorindo."
+        ),
     )
 
 

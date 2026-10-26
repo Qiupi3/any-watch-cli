@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import socket
 import threading
 import urllib.parse
 import urllib.request
@@ -9,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
-    from any_watch_core.base import StreamInfo, SubtitleTrack
+    from any_watch_core.base import StreamInfo
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "

@@ -14,7 +14,6 @@ from any_watch_core.config import get_config
 from any_watch_core.player import play_stream
 from any_watch_core.ui import (
     episode_sort_key,
-    parse_episode_range,
     prompt_episode_selection,
     prompt_selection,
     resolve_selected_episodes,
@@ -24,13 +23,15 @@ from any_watch_core.ui import (
 def _run(coro):  # Safe asyncio.run wrapper that never re-awaits on error
     try:
         asyncio.get_running_loop()
-        # A loop is already running in this thread, run in a separate thread
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(asyncio.run, coro).result()
     except RuntimeError:
-        # No loop running, run directly
+        # No loop running: run directly.
         return asyncio.run(coro)
+
+    # A loop is already running in this thread, run in a separate thread.
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
 
 
 def interactive_flow(

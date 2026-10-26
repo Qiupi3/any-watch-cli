@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "any-watch-core"
-version = "1.0.0"
+version = "1.1.0"
 description = "Core playback and streaming engine for any-watch suite"
 license = { text = "GPLv3" }
 readme = "README.md"

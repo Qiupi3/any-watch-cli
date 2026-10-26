@@ -4,16 +4,16 @@ build-backend = "hatchling.build"
 
 [project]
 name = "any-watch"
-version = "1.0.0"
+version = "1.1.0"
 description = "Universal terminal streaming suite — Movies, TV, Anime & Asian Drama"
 license = { text = "GPLv3" }
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-    "any-watch-core>=1.0.0",
-    "any-watch-flix>=1.0.0",
-    "any-watch-anime>=1.0.0",
-    "any-watch-drama>=1.0.0",
+    "any-watch-core>=1.1.0",
+    "any-watch-flix>=1.1.0",
+    "any-watch-anime>=1.1.0",
+    "any-watch-drama>=1.1.0",
 ]
 
 [project.scripts]

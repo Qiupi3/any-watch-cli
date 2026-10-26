@@ -24,6 +24,22 @@ class SubtitleTrack:
 
 
 @dataclass
+class SubtitleResult:
+    """A downloadable subtitle file returned by a subtitle-only provider."""
+
+    title: str
+    language: str
+    url: str
+    release: str = ""
+    provider: str = "SubDL"
+
+    @property
+    def display_tag(self) -> str:
+        rel = f" · {self.release}" if self.release else ""
+        return f"[{self.provider} | {self.language.upper()}] {self.title}{rel}"
+
+
+@dataclass
 class MediaItem:
     id: str  # unique ID, path, or URL
     title: str  # Display title
@@ -70,6 +86,8 @@ class StreamInfo:
 class BaseProvider(ABC):
     name: str = "base"
     category: str = "General"
+    kind: str = "stream"  # "stream" or "subtitle"
+    base_urls: tuple[str, ...] = ()
 
     @abstractmethod
     async def search(self, query: str) -> list[MediaItem]:
@@ -88,4 +106,20 @@ class BaseProvider(ABC):
         self, episode: EpisodeItem, quality: str | None = None
     ) -> StreamInfo:
         """Extract stream URL and subtitles for an episode"""
+        pass
+
+
+class BaseSubtitleProvider(ABC):
+    """Provider that only searches/downloads subtitle files (e.g. SubDL)."""
+
+    name: str = "Subtitles"
+    category: str = "General"
+    kind: str = "subtitle"
+    base_urls: tuple[str, ...] = ()
+
+    @abstractmethod
+    async def search_subtitles(
+        self, query: str, lang: str = "id"
+    ) -> list[SubtitleResult]:
+        """Search subtitle files for a movie or show."""
         pass

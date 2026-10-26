@@ -12,6 +12,10 @@ class Config:
     quality: str = "auto"
     sub_language: str = "ind"  # ind (Indonesian) or eng (English)
     stream_provider: str = "auto"
+    # Optional free API key from https://subdl.com/panel/api
+    subdl_api_key: str = ""
+    # Empty means ~/Downloads/any-watch-subtitles (or ./any-watch-subtitles)
+    download_dir: str = ""
 
 
 def _get_config_dir() -> Path:
