@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "any-watch-drama"
-version = "1.0.0"
-description = "Stream Korean and Chinese Dramas via DramaCool"
+version = "1.0.0.0"
+description = "Stream KDrama, CDrama, and Asian drama via KissKH, NaraShika, Nontongo, DramaSerial, and Drakorindo"
 license = { text = "GPLv3" }
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-    "any-watch-core>=1.0.0",
+    "any-watch-core>=1.0.0.0",
     "beautifulsoup4>=4.12.0",
 ]
 

@@ -2,17 +2,21 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 
 @dataclass
 class Config:
     player: str = "mpv"  # mpv, iina, vlc
-    download_dir: str = str(Path.home() / "Downloads" / "any-watch")
     quality: str = "auto"
-    sub_language: str = "english"
+    sub_language: str = "eng"  # eng (English) or ind (Indonesian)
     stream_provider: str = "auto"
+    # Auto-check the published version manifest once a day (bool).
+    check_updates: bool = True
+    # Optional overrides for the update manifest / wheel index.
+    update_url: str = ""
+    wheel_index: str = ""
 
 
 def _get_config_dir() -> Path:
@@ -36,7 +40,8 @@ def get_config() -> Config:
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return Config(**data)
+        known = {field.name for field in fields(Config)}
+        return Config(**{k: v for k, v in data.items() if k in known})
     except Exception:
         return Config()
 

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 import re
-from typing import Any
 from urllib.parse import parse_qs, urljoin, urlparse
 
 from bs4 import BeautifulSoup
@@ -14,6 +12,7 @@ from any_watch_core.base import (
     MediaItem,
     MediaType,
     StreamInfo,
+    SubtitleTrack,
 )
 
 BASE_URL = "https://flixhqz.net"
@@ -34,7 +33,7 @@ class FlixHQProvider(BaseProvider):
 
     async def search(self, query: str) -> list[MediaItem]:
         results: list[MediaItem] = []
-        async with httpx.AsyncClient(headers=HEADERS, timeout=10, follow_redirects=True) as client:
+        async with httpx.AsyncClient(headers=HEADERS, timeout=15, follow_redirects=True) as client:
             try:
                 resp = await client.get(SEARCH_URL, params={"keyword": query})
                 soup = BeautifulSoup(resp.text, "html.parser")
@@ -85,7 +84,8 @@ class FlixHQProvider(BaseProvider):
                         )
                     )
             except Exception as e:
-                print(f"[FlixHQ] Search error: {e}")
+                err_msg = str(e) or type(e).__name__
+                print(f"[FlixHQ] Search error: {err_msg}")
 
         return results
 
@@ -151,6 +151,12 @@ class FlixHQProvider(BaseProvider):
                         )
                     )
 
+            def _ep_sort_key(ep: EpisodeItem) -> tuple[float, str]:
+                m = re.search(r"(\d+(?:\.\d+)?)", str(ep.number))
+                return (float(m.group(1)) if m else float("inf"), str(ep.number))
+
+            episodes.sort(key=_ep_sort_key)
+
         return episodes
 
     async def get_stream(
@@ -160,14 +166,14 @@ class FlixHQProvider(BaseProvider):
             page_resp = await client.get(episode.id)
             soup = BeautifulSoup(page_resp.text, "html.parser")
 
-            # Look for video wrapper data-token
-            wrapper = (
-                soup.find(id="main-wrapper")
-                or soup.find(class_="watch_block")
+            token_el = (
+                soup.find(attrs={"data-token": True})
                 or soup.find(id="series-player")
                 or soup.find(class_="w_b-player")
+                or soup.find(class_="watch_block")
+                or soup.find(id="main-wrapper")
             )
-            token = wrapper.get("data-token") if wrapper else None
+            token = token_el.get("data-token") if token_el else None
 
             embed_link = None
             if token:
@@ -194,7 +200,6 @@ class FlixHQProvider(BaseProvider):
             if not embed_link:
                 raise RuntimeError(f"Could not retrieve server embed link for '{episode.title}'")
 
-            # Extract stream and subtitles
             stream_url, subs = await self._extract_stream_and_subs(embed_link, client)
             if not stream_url:
                 raise RuntimeError(f"Could not resolve video stream from {embed_link}")
@@ -214,9 +219,9 @@ class FlixHQProvider(BaseProvider):
 
     async def _extract_stream_and_subs(
         self, embed_link: str, client: httpx.AsyncClient
-    ) -> tuple[str | None, list[str]]:
+    ) -> tuple[str | None, list[SubtitleTrack]]:
         video_url = None
-        subs_list: list[str] = []
+        subs_list: list[SubtitleTrack] = []
 
         try:
             parsed = urlparse(embed_link)
@@ -230,11 +235,14 @@ class FlixHQProvider(BaseProvider):
                         if isinstance(tracks, list):
                             for track in tracks:
                                 if isinstance(track, dict) and "file" in track:
-                                    lbl = track.get("label", "").lower()
-                                    if "english" in lbl or "eng" in lbl:
-                                        subs_list.append(track["file"])
-                            if not subs_list and tracks and "file" in tracks[0]:
-                                subs_list.append(tracks[0]["file"])
+                                    lbl = track.get("label", "English")
+                                    lbl_l = lbl.lower()
+                                    if "ind" in lbl_l or "id" in lbl_l:
+                                        subs_list.append(SubtitleTrack(url=track["file"], label=lbl, lang="ind"))
+                                    elif "eng" in lbl_l:
+                                        subs_list.append(SubtitleTrack(url=track["file"], label=lbl, lang="eng"))
+                                    else:
+                                        subs_list.append(SubtitleTrack(url=track["file"], label=lbl, lang="other"))
                 except Exception:
                     pass
         except Exception:
@@ -255,8 +263,7 @@ class FlixHQProvider(BaseProvider):
                         if not subs_list:
                             vtts = re.findall(r"https?://[^\s\"\'\<\>]+\.vtt", res.text)
                             for v in vtts:
-                                if v not in subs_list:
-                                    subs_list.append(v)
+                                subs_list.append(SubtitleTrack(url=v, label="English", lang="eng"))
                         if video_url:
                             break
                 except Exception:
